@@ -109,6 +109,111 @@ curl -X POST http://localhost:3000/api/chat \
 
 ---
 
+## 架构决策：为什么用 SSE 不用 WebSocket？
+
+在实现流式输出时，你有三种实时通信方案可选。这里详细对比，帮你理解为什么 SSE（Server-Sent Events）是 AI 流式场景的最佳选择。
+
+### 三种方案对比
+
+| 特性 | SSE | WebSocket | Long Polling |
+|------|-----|-----------|--------------|
+| **通信方向** | 服务端 -> 客户端（单向） | 双向 | 客户端 -> 服务端（模拟推送） |
+| **协议** | HTTP/1.1 或 HTTP/2 | 独立协议（ws://） | HTTP |
+| **自动重连** | 浏览器内置支持 | 需手动实现 | 需手动实现 |
+| **负载均衡兼容** | 完全兼容（基于 HTTP） | 需要 sticky session | 完全兼容 |
+| **防火墙/代理兼容** | 完全兼容 | 可能被拦截 | 完全兼容 |
+| **服务端复杂度** | 低（普通 HTTP 响应） | 高（需维护连接状态） | 中（需管理超时和重试） |
+| **典型延迟** | 低（~ms） | 极低（~ms） | 高（取决于轮询间隔） |
+| **浏览器原生支持** | `EventSource` API | `WebSocket` API | 无（需 `fetch`/`XMLHttpRequest`） |
+
+### 什么时候用哪个？
+
+**SSE 适合的场景：**
+- 服务端向客户端推送数据（AI 回复、股票行情、通知推送）
+- 不需要客户端频繁向服务端发消息
+- 需要简单可靠的实现
+
+**WebSocket 适合的场景：**
+- 双向实时通信（在线聊天室、多人协作编辑、游戏）
+- 客户端需要高频发送数据（鼠标位置、键盘输入）
+- 对延迟极其敏感（毫秒级）
+
+**Long Polling 适合的场景：**
+- 需要兼容非常老的浏览器或网络环境
+- 推送频率很低（几分钟一次）
+- 无法使用 SSE 或 WebSocket 的受限环境
+
+### 为什么 SSE 最适合 AI 流式输出？
+
+AI 对话场景有一个关键特点：**数据流是单方向的**。用户发一条消息，AI 返回一大段回复。整个过程中，客户端只需要接收数据，不需要在流式传输过程中向服务端发消息。
+
+这恰好是 SSE 的最佳使用场景：
+
+1. **单向推送**：AI 回复从服务端流向客户端，不需要双向通信
+2. **HTTP 兼容**：不需要升级协议，与现有的 REST API、中间件、CDN 完全兼容
+3. **自动重连**：浏览器的 `EventSource` API 内置重连机制，网络抖动时自动恢复
+4. **负载均衡友好**：每个请求都是标准 HTTP 请求，普通的负载均衡器就能处理
+
+### 代码对比：SSE vs WebSocket 实现同一个功能
+
+**SSE 方案（我们使用的）：**
+
+```typescript
+// 服务端：普通 HTTP 响应，设置 Content-Type 即可
+// server/api/chat.post.ts
+export default defineEventHandler(async (event) => {
+  const { messages } = await readBody(event)
+  const result = streamText({ model: anthropic('claude-sonnet-4-20250514'), messages })
+  return result.toDataStreamResponse()
+  // AI SDK 自动设置 Content-Type: text/event-stream
+})
+
+// 客户端：用 fetch 就能接收流式数据
+const response = await fetch('/api/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ messages }),
+})
+const reader = response.body.getReader()
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  // 处理每一块数据
+}
+```
+
+**WebSocket 方案（不推荐，仅作对比）：**
+
+```typescript
+// 服务端：需要专门的 WebSocket 服务器
+// 需要额外的库（如 ws、socket.io），不能用普通的 HTTP handler
+import { WebSocketServer } from 'ws'
+const wss = new WebSocketServer({ port: 8080 })
+wss.on('connection', (ws) => {
+  ws.on('message', async (data) => {
+    const { messages } = JSON.parse(data)
+    const result = streamText({ model: anthropic('claude-sonnet-4-20250514'), messages })
+    for await (const chunk of result.textStream) {
+      ws.send(JSON.stringify({ type: 'chunk', content: chunk }))
+    }
+    ws.send(JSON.stringify({ type: 'done' }))
+  })
+})
+
+// 客户端：需要管理连接生命周期
+const ws = new WebSocket('ws://localhost:8080')
+ws.onopen = () => ws.send(JSON.stringify({ messages }))
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data)
+  // 处理数据...
+}
+// 还需要处理 onclose、onerror、手动重连...
+```
+
+WebSocket 方案需要：额外的服务器进程、手动管理连接状态、手动实现重连逻辑、处理 sticky session（多实例部署时）。对于 AI 流式输出这种单向推送场景，这些额外复杂度完全没有必要。
+
+---
+
 ## 第二步：创建 Chat 窗口组件
 
 这个组件是聊天界面的主体——包含消息列表和输入框。
@@ -331,6 +436,82 @@ async function copyContent() {
 
 ---
 
+## 架构决策：Markdown 渲染方案对比
+
+AI 回复的核心特征是包含 Markdown 格式（标题、列表、代码块、表格等）。选择合适的 Markdown 渲染方案直接影响用户体验和应用性能。
+
+### 四种主流方案对比
+
+| 方案 | 包体积（minified） | 代码高亮 | 渲染速度 | 生态插件 | 学习成本 |
+|------|-------------------|----------|----------|----------|----------|
+| **marked + highlight.js** | ~45KB + ~30KB | highlight.js（300+ 语言） | 快 | 少 | 低 |
+| **markdown-it + highlight.js** | ~55KB + ~30KB | highlight.js（300+ 语言） | 快 | 丰富（100+ 插件） | 中 |
+| **remark（unified 生态）** | ~150KB+（含插件） | 需额外配置 | 中 | 极其丰富 | 高 |
+| **shiki** | ~200KB+（含主题和语言包） | 内置（TextMate 语法） | 慢（首次加载） | 少 | 低 |
+
+### 包体积对比（gzip 后的实际传输大小）
+
+```
+marked + highlight.js   ████████░░░░░░░░░░░░  ~35KB gzipped
+markdown-it + highlight  █████████░░░░░░░░░░░  ~40KB gzipped
+remark (full setup)      ████████████████░░░░  ~80KB gzipped
+shiki                    ██████████████████░░  ~100KB gzipped
+```
+
+### 为什么选择 marked + highlight.js？
+
+在这个项目中，我们选择 `marked + highlight.js` 组合，原因如下：
+
+1. **体积最小**：两者合计 gzip 后约 35KB，对首屏加载影响最小
+2. **性能最好**：marked 的渲染速度在所有方案中最快，流式场景下每收到一个 chunk 都需要重新渲染，性能至关重要
+3. **功能够用**：AI 回复主要用到 Markdown 的核心语法（标题、列表、代码块、粗体、链接），marked 全部支持
+4. **highlight.js 语言覆盖广**：内置 300+ 种编程语言的语法高亮，覆盖 AI 回复中可能出现的所有代码语言
+5. **API 简单**：`marked(text)` 一行代码就能用，不需要复杂的 unified pipeline 配置
+
+**什么时候该换其他方案？**
+- 需要自定义 Markdown 语法（如自定义容器、脚注）-> 换 `markdown-it`，它的插件系统更灵活
+- 需要 AST 操作（如提取文章目录、修改链接）-> 换 `remark`，它提供完整的 AST 访问
+- 对代码高亮的视觉效果要求极高（精确到每个 token 的颜色）-> 换 `shiki`，它使用 VS Code 的 TextMate 语法，效果最好
+
+### 安全警告：XSS 风险与 v-html
+
+代码中使用了 Vue 的 `v-html` 指令来渲染 Markdown 生成的 HTML：
+
+```vue
+<div v-html="renderedContent" />
+```
+
+**这是一个已知的安全风险**。`v-html` 会直接插入原始 HTML，如果 AI 回复中包含恶意脚本（比如 `<script>alert('xss')</script>`），就会执行。
+
+在我们的场景中，风险相对可控：
+- AI 模型本身不会主动生成恶意脚本
+- 内容来源是受信任的 Claude API，不是用户输入
+
+但在生产环境中，你应该额外做一层防护：
+
+```typescript
+import DOMPurify from 'dompurify'
+
+const renderedContent = computed(() => {
+  if (props.message.role === 'user') return props.message.content
+  const rawHtml = marked(props.message.content)
+  // 用 DOMPurify 过滤掉危险的 HTML 标签和属性
+  return DOMPurify.sanitize(rawHtml, {
+    ADD_TAGS: ['pre', 'code'],  // 允许代码标签
+    ADD_ATTR: ['class'],         // 允许 class 属性（用于语法高亮）
+  })
+})
+```
+
+安装 DOMPurify：
+
+```bash
+npm install dompurify
+npm install -D @types/dompurify
+```
+
+---
+
 ## 第四步：创建首页
 
 把 Chat 窗口放到首页上。
@@ -438,6 +619,119 @@ export default defineNuxtConfig({
 
 **完成这一步后你应该看到：**
 - AI 回复时末尾有一个绿色的闪烁光标
+
+---
+
+## 成本控制
+
+AI API 按 token 计费，不控制成本会收到意外账单。这一节帮你理解 token 计费逻辑，并给出实用的成本控制策略。
+
+### 什么是 Token？
+
+Token 是 AI 模型处理文本的基本单位。粗略换算：
+- 英文：1 个 token 约等于 4 个字符，或 0.75 个单词
+- 中文：1 个 token 约等于 1-2 个汉字（中文的 token 效率比英文低）
+
+```
+"Hello, world!"     -> 4 tokens
+"你好，世界！"       -> 6 tokens
+一段 1000 字的中文文章 -> 约 800-1200 tokens
+```
+
+### Claude API 定价（以 Claude Sonnet 4 为例）
+
+| 计费项 | 价格 |
+|--------|------|
+| 输入 token | $3 / 百万 token |
+| 输出 token | $15 / 百万 token |
+
+注意：**输出 token 的单价是输入的 5 倍**。这意味着让 AI 生成长回复比发送长提示词贵得多。
+
+### 如何估算一次对话的成本
+
+一次完整的对话请求包含三部分 token 消耗：
+
+```
+总 token = 系统提示词 + 历史消息 + AI 回复
+         (固定成本)    (随对话增长)   (输出成本)
+```
+
+**实际估算示例（10 轮对话）：**
+
+```
+系统提示词：     ~200 tokens（固定，每轮都算）
+第 1 轮：用户 30 tokens + AI 200 tokens
+第 2 轮：用户 20 tokens + AI 300 tokens + 前 2 轮历史 250 tokens
+...
+第 10 轮：用户 25 tokens + AI 400 tokens + 前 9 轮历史 ~2500 tokens
+
+总输入 token（累计）：约 12,000 tokens
+总输出 token（累计）：约 3,000 tokens
+
+成本 = 12,000 × $3/1M + 3,000 × $15/1M
+     = $0.036 + $0.045
+     = $0.081（约 0.6 元人民币）
+```
+
+一个 10 轮的深度对话，成本不到 1 块钱。但如果并发用户多（比如 1000 人同时对话），成本就会变成 $81/轮，需要认真控制。
+
+### maxTokens 策略：为什么是 4096？
+
+代码中的 `maxTokens: 4096` 限制了 AI 单次回复的最大长度：
+
+```typescript
+const result = streamText({
+  model: anthropic('claude-sonnet-4-20250514'),
+  messages,
+  maxTokens: 4096,  // 最多生成 4096 个 output token
+})
+```
+
+**4096 是一个平衡点：**
+- 太小（如 1024）：AI 回复会被截断，代码示例写不完
+- 太大（如 16384）：AI 可能生成冗长回复，浪费 token 和用户时间
+- 4096 约等于 3000 个中文字，足够回答大部分技术问题
+
+**什么时候调整：**
+- 代码生成场景（需要长代码）-> 提高到 8192
+- 简单问答场景（FAQ、客服）-> 降低到 1024
+- 翻译场景（输入输出长度接近）-> 设为输入长度的 1.5 倍
+
+### 流式 vs 非流式：成本一样，体验不同
+
+一个常见的误解：流式输出会不会更贵？
+
+**答案：不会。** 流式和非流式消耗的 token 数完全相同，区别只在于数据的传输方式。
+
+```
+非流式：等 AI 生成完所有 token -> 一次性返回 -> 用户等待 10 秒
+流式：  AI 每生成一个 token 就返回 -> 逐字显示 -> 用户 0.5 秒后就开始看到内容
+```
+
+两者消耗的 token 一模一样，计费也一模一样。但流式让用户的**感知等待时间**从 10 秒降到 0.5 秒，这是纯 UX 优化，不增加成本。
+
+### 成本控制实战建议
+
+1. **设置 maxTokens 上限**：防止单次请求消耗过多 output token
+2. **限制历史消息轮数**：只发送最近 N 轮对话，而不是全部历史
+3. **压缩系统提示词**：系统提示词每轮都算输入 token，越短越省
+4. **监控用量**：Anthropic 控制台可以查看 API 用量和账单
+5. **设置用量上限**：在 Anthropic 控制台设置月度预算上限，防止意外超支
+
+```typescript
+// 限制历史消息轮数的示例
+const MAX_HISTORY_ROUNDS = 10
+
+const trimmedMessages = messages.slice(-MAX_HISTORY_ROUNDS * 2)
+// 每轮包含 1 条用户消息 + 1 条 AI 回复，所以乘 2
+
+const result = streamText({
+  model: anthropic('claude-sonnet-4-20250514'),
+  system: systemPrompt,
+  messages: trimmedMessages,
+  maxTokens: 4096,
+})
+```
 
 ---
 

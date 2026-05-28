@@ -120,27 +120,28 @@ Reddit 社区有一个更犀利的比喻：
 | 层次 | 能力 | 核心技能 | 从哪里开始 |
 |------|------|----------|----------|
 | **L1 使用者** | 工具操作 | Claude Code、Cursor 配置，CLAUDE.md 编写 | [环境武装](/roadmap/01-dev-environment) |
-| **L2 集成者** | AI 工程 | Vercel AI SDK、RAG、Function Calling | [学习路线](/roadmap) |
-| **L3 构建者** | 架构设计 | 设计 AI 驱动的产品、Agent 编排 | [实战演练](/playground) |
+| **L2 集成者** | AI 工程 | Vercel AI SDK、RAG、Function Calling、MCP 协议 | [AI 全栈集成](/roadmap/06-integration-guide) |
+| **L3 构建者** | 架构设计 | 设计 AI 驱动的产品、成本控制、安全方案、Agent 编排 | [架构决策](/playground/05-architecture-decisions) |
 
 ## 从哪里开始？
 
-### 如果你是完全零基础
+### 如果你是完全零基础（L1）
 
 1. 先读 [环境武装](/roadmap/01-dev-environment) — 配置你的开发工具
 2. 然后读 [Vercel AI SDK](/roadmap/02-vercel-ai-sdk) — 搭建你的第一个 AI 聊天
 3. 最后去 [实战演练](/playground) — 跟着做一个完整的项目
 
-### 如果你已经会用 Cursor / Claude Code
+### 如果你已经会用工具（L2）
 
-1. 直接跳到 [学习路线](/roadmap) — 系统学习 AI 前端开发
+1. 读 [AI 全栈集成](/roadmap/06-integration-guide) — 把 SDK、RAG、FC、MCP 串成一个项目
 2. 用 [Prompt 库](/prompts) 提升日常开发效率
 3. 去 [实战演练](/playground) 做一个完整项目
 
-### 如果你想快速提升 Prompt 能力
+### 如果你想做架构决策（L3）
 
-1. 去 [Prompt 库](/prompts) — 每个 Prompt 都可以复制即用
-2. 理解 [五层 Prompt 架构](/prompts) — 提升首次代码准确率 60%
+1. 读 [架构决策](/playground/05-architecture-decisions) — 成本、安全、Agent 编排、生产部署
+2. 去 [实战演练](/playground) 做完整项目，每个都有架构决策点
+3. 用 [Prompt 库](/prompts) 中的高级 Prompt 提升效率
 
 ## 下一步
 

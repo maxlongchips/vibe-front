@@ -656,3 +656,4 @@ server.tool('read_file', '读取文件', { path: z.string() }, async ({ path }) 
 ---
 
 **上一篇：** [RAG 全栈落地：从 Embedding 到向量检索的前端集成](/roadmap/04-rag-frontend)
+**下一篇：** [AI 全栈集成：从零搭建智能文档助手](/roadmap/06-integration-guide)
