@@ -296,6 +296,32 @@ defineProps<{ score: number }>()
 </script>
 ```
 
+## Reranking：提升检索质量的关键
+
+向量搜索返回的 top-K 结果不一定按相关性排序。Reranking 用更精确的模型重新排序：
+
+```typescript
+import { rerank } from 'ai'
+
+// 第一步：向量检索（宽泛，取 20 个候选）
+const candidates = await queryVectors(embedding, 20)
+
+// 第二步：Reranking（精确，取 top 5）
+const reranked = await rerank({
+  model: anthropic('claude-sonnet-4-20250514'),
+  query: userQuestion,
+  documents: candidates.map(c => c.metadata.text),
+  topK: 5,
+})
+
+// 第三步：用 reranked 的结果构建上下文
+const context = reranked
+  .map((r, i) => `[来源 ${i + 1}] ${r.document}`)
+  .join('\n\n---\n\n')
+```
+
+完整管道：`embed → store → retrieve → rerank → augment prompt → generate`
+
 ## 本节要点
 
 1. RAG = 检索 + 生成，让 AI 基于你的知识库回答
@@ -303,6 +329,7 @@ defineProps<{ score: number }>()
 3. 向量数据库选型看场景：Pinecone 省心、Qdrant 可控
 4. 回答必须附带引用来源，用户需要验证
 5. 置信度 UI 帮助用户判断回答可靠性
+6. Reranking 是提升检索质量的关键步骤
 
 ---
 

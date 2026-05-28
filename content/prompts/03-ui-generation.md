@@ -9,30 +9,34 @@ category: Prompt 库
 
 > 描述越精确，生成越准确。告诉 AI "什么样式"不如告诉它"什么感觉"。
 
-## 核心 Prompt 模板
+## 核心 Prompt 模板（五层架构版）
 
 ```markdown
-## 角色
-你是一个精通 Tailwind CSS 和 Vue 3 的 UI 开发专家。
+## 第 1 层：上下文
+技术栈：Nuxt 3 + Vue 3 <script setup> + TypeScript + Tailwind CSS
+设计系统：zinc 色系暗黑主题，emerald 作为强调色
+图标库：lucide-vue-next
 
-## 任务
-根据以下描述生成 Vue 3 组件代码。
-
-## 组件描述
+## 第 2 层：需求
 [用自然语言描述组件的功能和外观]
+[描述"感受"而非"像素" — "科技感、暗黑风" 比 "border-radius: 12px" 更好]
 
-## 技术要求
-- 使用 <script setup lang="ts">
-- 样式全部使用 Tailwind CSS 类名
-- 支持暗黑模式（zinc 色系）
+## 第 3 层：约束
 - 响应式设计（移动端优先）
-- 使用 lucide-vue-next 图标
+- 支持加载态（骨架屏）
+- 支持空状态
+- 可访问性（aria 属性）
 
-## 参考风格
-[可选：附上你项目的其他组件代码作为风格参考]
+## 第 4 层：集成
+- 这个组件会被谁使用？
+- 需要 emit 哪些事件？
+- Props 从哪里来？
 
-## 输出
-完整的 .vue 文件代码，包含 Props 类型定义。
+## 第 5 层：输出
+完整的 .vue 文件代码，包含：
+- Props 类型定义（interface）
+- Emits 声明
+- 加载态和空状态处理
 ```
 
 ## 实战示例

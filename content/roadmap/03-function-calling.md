@@ -305,6 +305,36 @@ tools: {
 </template>
 ```
 
+## AI SDK 6 工具改进
+
+### Strict Mode 按工具启用
+
+AI SDK 6 中，strict mode 不再是全局设置，而是**每个工具独立控制**：
+
+```typescript
+tools: {
+  // 这个工具用 strict mode（兼容 JSON Schema）
+  search_docs: tool({
+    description: '搜索文档',
+    parameters: z.object({ query: z.string() }),
+    strict: true,  // 启用 strict mode
+    execute: async ({ query }) => { /* ... */ },
+  }),
+
+  // 这个工具不用 strict mode（灵活参数）
+  free_form_tool: tool({
+    description: '自由格式工具',
+    parameters: z.object({ input: z.string() }),
+    // 不设置 strict，默认为 false
+    execute: async ({ input }) => { /* ... */ },
+  }),
+}
+```
+
+### 工具调用输入流式传输
+
+AI SDK 6 中，工具调用的输入参数默认流式传输 — 大参数（如代码块）不会阻塞 UI。
+
 ## 本节要点
 
 1. Function Calling 让 AI 从"聊天"进化为"行动"
@@ -312,6 +342,7 @@ tools: {
 3. 多轮工具调用由 SDK 自动编排，前端只需渲染状态
 4. 危险操作必须加确认机制
 5. UI 上用折叠面板或时间线展示工具执行链
+6. AI SDK 6 支持 strict mode 按工具独立控制
 
 ---
 

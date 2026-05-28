@@ -1,13 +1,13 @@
 ---
 title: MCP 协议深度拆解：前端开发者视角
-description: MCP 的 Tools/Resources/Prompts 三板斧、用 TypeScript 写一个自定义 MCP Server、在 Nuxt 3 中集成 MCP Client
+description: MCP 架构、Tools/Resources/Prompts 三板斧、TypeScript 实战、安全最佳实践、常见踩坑
 tags: ['mcp', 'model-context-protocol', 'typescript', 'nuxt']
 category: 学习路线
 ---
 
 # MCP 协议深度拆解：前端开发者视角
 
-> MCP 是 AI 工具的"USB 协议"。理解它，你就能让 AI 连接任何东西。
+> MCP 是 AI 工具的"Type-C 接口" — 一个通用标准，让 AI 连接任何东西。
 
 ## MCP 是什么？
 
@@ -17,15 +17,38 @@ MCP（Model Context Protocol）是 Anthropic 发布的开放协议，定义了 A
 
 **有了 MCP 之后：** 一个 MCP Server 可以被 Claude Code、Cursor、任何支持 MCP 的客户端使用。
 
+这个协议已经被 OpenAI、Google 等公司采纳，正在成为行业标准。阿里云、腾讯云都在构建 MCP 生态市场。
+
 ## 核心架构
 
+MCP 使用客户端-服务器架构，有四个组件：
+
 ```
-MCP Client (Claude Code / Cursor / 你的应用)
-    ↕ JSON-RPC 2.0
-MCP Server (工具提供方)
-    ↕
-外部资源 (文件系统 / 数据库 / API)
+┌─────────────────────────────────────┐
+│ MCP Host（Claude Code / Cursor / 你的应用）│
+│  ┌──────────────┐                    │
+│  │ MCP Client   │ ← 管理服务器连接    │
+│  └──────┬───────┘                    │
+└─────────┼───────────────────────────┘
+          │ JSON-RPC 2.0
+┌─────────┼───────────────────────────┐
+│ MCP Server（工具提供方）              │
+│  ┌──────┴───────┐                    │
+│  │ Tools        │ ← AI 可调用的函数   │
+│  │ Resources    │ ← AI 可读取的数据   │
+│  │ Prompts      │ ← 预定义的模板     │
+│  └──────┬───────┘                    │
+└─────────┼───────────────────────────┘
+          │
+    外部资源（文件系统 / 数据库 / API）
 ```
+
+### 两种传输方式
+
+| 传输方式 | 用途 | 场景 |
+|----------|------|------|
+| **stdio** | 本地进程通信 | 本地 MCP Server，Claude Code 默认 |
+| **SSE / streamable-http** | 网络通信 | 远程 MCP Server，团队共享 |
 
 ## 三种核心能力
 
@@ -37,7 +60,7 @@ AI 可以调用的函数。类似 Function Calling，但是标准化的。
 // 定义一个工具
 server.tool(
   'search_docs',           // 工具名
-  '搜索项目文档',            // 描述
+  '搜索项目文档',            // 描述（AI 靠这个决定何时调用）
   {                         // 参数 Schema
     query: z.string().describe('搜索关键词'),
     limit: z.number().optional().default(10),
@@ -103,7 +126,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { readFile, readdir } from 'fs/promises'
-import { join, relative } from 'path'
+import { join } from 'path'
 
 const server = new McpServer({
   name: 'nuxt-project',
@@ -205,7 +228,7 @@ await server.connect(transport)
 ### 在 Claude Code 中注册
 
 ```json
-// .claude/mcp.json
+// .mcp.json
 {
   "mcpServers": {
     "nuxt-project": {
@@ -215,6 +238,8 @@ await server.connect(transport)
   }
 }
 ```
+
+用 `claude mcp list` 验证是否注册成功。
 
 ## 在 Nuxt 3 应用中集成 MCP Client
 
@@ -262,17 +287,94 @@ export async function searchComponentsViaMcp(query: string) {
 | 定义位置 | 在 API 路由中硬编码 | 独立的 Server 进程 |
 | 复用性 | 单个项目 | 跨项目、跨客户端 |
 | 动态发现 | 不支持 | 客户端自动发现工具 |
-| 生态 | 各自为政 | 标准化生态 |
+| 生态 | 各自为政 | 标准化生态（1000+ 社区 server） |
+| 传输 | HTTP 请求内 | stdio / SSE / streamable-http |
 
 **简单说：** Function Calling 是"本地函数"，MCP 是"微服务"。
 
+## 常见踩坑
+
+### 1. 装太多 MCP Server
+
+每个 server 都有开销。很多能力 Claude 已经内置了（文件搜索、Git 操作）。只装你真正需要的。
+
+### 2. 工具职责太宽泛
+
+一个工具做太多事，AI 会困惑何时使用它。每个工具应该**只做一件事**。
+
+### 3. 错误信息太模糊
+
+```
+// ❌ 坏的
+return { content: [{ type: 'text', text: 'Error' }] }
+
+// ✅ 好的
+return {
+  content: [{
+    type: 'text',
+    text: `搜索失败：目录 "${dir}" 不存在。请检查路径是否正确。`
+  }]
+}
+```
+
+模糊的错误让 Claude 无法恢复。清晰的错误信息让 Claude 能自动重试或给出替代方案。
+
+### 4. 暴露敏感信息
+
+```json
+// ❌ 不要这样做
+{
+  "mcpServers": {
+    "db": {
+      "command": "npx",
+      "args": ["tsx", "./mcp-server/db.ts"],
+      "env": {
+        "DB_PASSWORD": "super-secret"  // 不要硬编码！
+      }
+    }
+  }
+}
+```
+
+永远不要在 MCP 配置中暴露密码。使用环境变量引用，让 Claude Code 自己读取 `.env`。
+
+### 5. 没有输入验证
+
+```typescript
+// ❌ 不验证输入
+server.tool('read_file', '读取文件', { path: z.string() }, async ({ path }) => {
+  const content = await readFile(path, 'utf-8')  // path 可能是 ../../../etc/passwd
+  return { content: [{ type: 'text', text: content }] }
+})
+
+// ✅ 验证输入
+server.tool('read_file', '读取文件', { path: z.string() }, async ({ path }) => {
+  const resolved = join(PROJECT_ROOT, path)
+  if (!resolved.startsWith(PROJECT_ROOT)) {
+    throw new Error('路径超出项目范围')
+  }
+  const content = await readFile(resolved, 'utf-8')
+  return { content: [{ type: 'text', text: content }] }
+})
+```
+
+## 安全最佳实践
+
+1. **最小权限原则** — 只暴露你需要的能力，不要开放整个文件系统
+2. **参数化查询** — 数据库操作永远用参数化查询，不要拼接 SQL
+3. **只读连接** — 如果只需要读数据，用只读数据库连接
+4. **OAuth 2.1 + PKCE** — 远程 MCP Server 用标准认证协议
+5. **输入验证** — 所有来自客户端的输入都要验证
+
 ## 本节要点
 
-1. MCP 是 AI 工具的标准化协议，类似 USB
+1. MCP 是 AI 工具的标准化协议，类似 Type-C 接口
 2. 三种能力：Tools（调用）、Resources（读取）、Prompts（模板）
-3. 用 `@modelcontextprotocol/sdk` 写 MCP Server
-4. 一个 MCP Server 可以被所有支持 MCP 的客户端使用
-5. 前端应用也可以作为 MCP Client 连接外部工具
+3. 两种传输：stdio（本地）、SSE/HTTP（远程）
+4. 用 `@modelcontextprotocol/sdk` 写 MCP Server
+5. 一个 MCP Server 可以被所有支持 MCP 的客户端使用
+6. 安全第一：最小权限、输入验证、不要暴露敏感信息
+7. 不要装太多 server，每个都有开销
 
 ---
 

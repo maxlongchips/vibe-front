@@ -1,22 +1,25 @@
 ---
-title: Vercel AI SDK 核心：从 useChat 到流式架构
-description: @ai-sdk/vue 的 useChat / useCompletion 源码级拆解，SSE 原理、ReadableStream 处理、中断与恢复策略
-tags: ['vercel-ai-sdk', 'streaming', 'sse', 'vue']
+title: Vercel AI SDK 核心：从 useChat 到 Agent 架构
+description: AI SDK 6 的 useChat、ToolLoopAgent、消息分片模型、流式架构、Reranking、MCP 集成
+tags: ['vercel-ai-sdk', 'streaming', 'ai-sdk-6', 'agent']
 category: 学习路线
 ---
 
-# Vercel AI SDK 核心：从 useChat 到流式架构
+# Vercel AI SDK 核心：从 useChat 到 Agent 架构
 
 > 流式输出不是"打字机效果"那么简单。理解底层机制，你才能处理真实场景中的各种边界情况。
 
 ## 为什么选 Vercel AI SDK？
 
-2026 年的 AI 前端开发，SDK 选择已经收敛。Vercel AI SDK 的优势：
+2026 年的 AI 前端开发，SDK 选择已经收敛。Vercel AI SDK 月下载量超过 2000 万次。
 
 - **框架无关**：支持 Vue、React、Svelte
-- **流式一等公民**：不是事后加的 streaming，而是从底层就为流式设计
+- **流式一等公民**：从底层就为流式设计
 - **TypeScript 原生**：类型推导精确到每一个 token
-- **多模型支持**：Claude、GPT、Gemini 一个接口搞定
+- **多模型支持**：Claude、GPT、Gemini、Mistral、xAI 一个接口搞定
+- **Agent 原生**：AI SDK 6 提供了一等公民的 Agent 抽象
+
+真实案例：Thomson Reuters 用 3 个开发者、2 个月时间，基于 Vercel AI SDK 构建了 CoCounsel（AI 法律助手），服务 1300 家会计事务所。
 
 ## 安装
 
@@ -28,6 +31,21 @@ npm install ai @ai-sdk/vue @ai-sdk/anthropic
 
 `useChat` 是整个 SDK 的核心。它不是一个简单的"发送消息"函数，而是一个**完整的聊天状态管理器**。
 
+### 消息分片模型（Message Parts）
+
+AI SDK 6 的杀手特性。消息不再是纯文本，而是**交错的 parts**：
+
+```
+一条消息可以包含：
+├── text part: "根据搜索结果..."
+├── tool-call part: { name: "search_docs", args: { query: "..." } }
+├── tool-result part: { results: [...] }
+├── reasoning part: { text: "让我分析一下..." }
+└── text part: "总结如下..."
+```
+
+**你必须渲染每一种 part 类型**，否则工具调用的 UI 会丢失。
+
 ### 基础用法
 
 ```vue
@@ -36,20 +54,16 @@ import { useChat } from '@ai-sdk/vue'
 
 const { messages, input, handleSubmit, isLoading, error, stop } = useChat({
   api: '/api/chat',
-  // 可选：自定义请求头
   headers: {
     'Authorization': `Bearer ${useRuntimeConfig().public.apiToken}`
   },
-  // 可选：请求体附加数据
   body: {
     model: 'claude-sonnet-4-20250514',
     temperature: 0.7
   },
-  // 可选：错误处理
   onError: (error) => {
     console.error('Chat error:', error)
   },
-  // 可选：消息发送完成回调
   onFinish: (message) => {
     console.log('Message completed:', message)
   }
@@ -129,7 +143,6 @@ export default defineLazyEventHandler(async () => {
       maxTokens: 4096,
     })
 
-    // 返回流式响应
     return result.toDataStreamResponse()
   })
 })
@@ -163,28 +176,55 @@ data: [DONE]
 
 每个 `data:` 行是一个 chunk，浏览器可以**边接收边渲染**，不需要等整个响应完成。
 
-## useCompletion：非聊天场景的流式输出
+## AI SDK 6：Agent 抽象
 
-如果你不需要聊天历史，只需要"输入 → 生成"的模式：
+AI SDK 6 引入了一等公民的 `ToolLoopAgent` — 处理完整的工具执行循环：
 
-```vue
-<script setup lang="ts">
-import { useCompletion } from '@ai-sdk/vue'
+```
+调用 LLM → 执行工具调用 → 把结果加回消息 → 重复（最多 20 步）
+```
 
-const { completion, input, handleSubmit, isLoading } = useCompletion({
-  api: '/api/generate',
+```typescript
+import { ToolLoopAgent } from 'ai'
+
+const weatherAgent = new ToolLoopAgent({
+  model: 'anthropic/claude-sonnet-4-20250514',
+  instructions: '你是一个天气助手。',
+  tools: { weather: weatherTool },
 })
-</script>
 
-<template>
-  <div>
-    <textarea v-model="input" placeholder="描述你需要的组件..." />
-    <button @click="handleSubmit" :disabled="isLoading">
-      生成代码
-    </button>
-    <pre v-if="completion"><code>{{ completion }}</code></pre>
-  </div>
-</template>
+// 在 API 路由中使用
+const result = await weatherAgent.generate({ prompt: '旧金山天气怎么样？' })
+```
+
+**核心优势：** 定义一次，可以在聊天 UI、后台任务、API 端点中复用，完整类型安全。
+
+## Call Options：类型安全的请求参数
+
+```typescript
+// 定义 call options schema
+import { z } from 'zod'
+
+const callOptionsSchema = z.object({
+  context: z.string().optional().describe('RAG 检索到的上下文'),
+  model: z.enum(['sonnet', 'opus']).optional(),
+})
+
+// 在 agent 中使用
+const agent = new ToolLoopAgent({
+  model: 'anthropic/claude-sonnet-4-20250514',
+  callOptionsSchema,
+  tools: { /* ... */ },
+})
+
+// 每次调用可以注入不同的上下文
+const result = await agent.generate({
+  prompt: '用户的问题',
+  options: {
+    context: '从向量数据库检索到的相关文档...',
+    model: 'opus',
+  }
+})
 ```
 
 ## 中断与恢复：stop() 的底层实现
@@ -212,7 +252,6 @@ async function handleSubmit(e: Event) {
     if (done) break
 
     const chunk = decoder.decode(value)
-    // 逐 chunk 更新 messages
     appendChunk(chunk)
   }
 }
@@ -247,7 +286,6 @@ const result = streamText({
   model: anthropic('claude-sonnet-4-20250514'),
   messages,
   maxTokens: 4096,
-  // 关键：设置 abortSignal 超时
 })
 ```
 
@@ -271,54 +309,60 @@ export default defineEventHandler(async (event) => {
 })
 ```
 
-## 高级：自定义 Stream 处理
+## Reranking：RAG 管道的关键一环
 
-如果你需要在前端对流式数据做特殊处理：
+AI SDK 6 新增了 Reranking 支持 — 对检索到的文档按相关性重新排序：
 
 ```typescript
-// server/api/chat.post.ts
-import { anthropic } from '@ai-sdk/anthropic'
-import { streamText } from 'ai'
+import { rerank } from 'ai'
 
-export default defineEventHandler(async (event) => {
-  const { messages } = await readBody(event)
+// 从向量数据库检索到的候选文档
+const candidates = await queryVectors(embedding, 20)
 
-  const result = streamText({
-    model: anthropic('claude-sonnet-4-20250514'),
-    messages,
-  })
-
-  // 自定义：在流式输出中注入元数据
-  const stream = result.toDataStreamResponse({
-    getErrorMessage: (error) => {
-      if (error instanceof Error) return error.message
-      return '未知错误'
-    },
-  })
-
-  return stream
+// 用 reranker 重新排序，取 top 5
+const reranked = await rerank({
+  model: anthropic('claude-sonnet-4-20250514'),
+  query: userQuestion,
+  documents: candidates,
+  topK: 5,
 })
 ```
 
-## 性能优化：减少首 Token 延迟
+完整的 RAG 管道：`embed → store → retrieve → rerank → augment prompt → generate`
+
+## Provider Adapter：一行代码切换模型
 
 ```typescript
-// 使用 generateId 减少客户端计算
-import { generateId } from 'ai'
+// 切换到 OpenAI
+const result = streamText({
+  model: openai('gpt-4o'),
+  messages,
+})
 
-const { messages } = useChat({
-  id: 'chat-1', // 固定 ID，支持会话持久化
-  generateId, // 使用 SDK 内置 ID 生成器
+// 切换到 Google
+const result = streamText({
+  model: google('gemini-2.5-pro'),
+  messages,
+})
+
+// 切换到 Mistral
+const result = streamText({
+  model: mistral('mistral-large'),
+  messages,
 })
 ```
+
+一个环境变量就能切换供应商，不需要改代码。
 
 ## 本节要点
 
 1. `useChat` 是完整的聊天状态管理器，不只是"发消息"
-2. 流式传输基于 SSE，不是 WebSocket
-3. `stop()` 是彻底中断，不是暂停
-4. 错误处理必须覆盖：网络超时、Token 超限、限流
-5. 服务端用 `streamText` + `toDataStreamResponse` 返回流式响应
+2. 消息分片模型（message-parts）是 AI SDK 6 的杀手特性，必须渲染每种 part 类型
+3. `ToolLoopAgent` 提供一等公民的 Agent 抽象，定义一次到处复用
+4. 流式传输基于 SSE，不是 WebSocket
+5. `stop()` 是彻底中断，不是暂停
+6. Reranking 是 RAG 管道的质量关键
+7. Provider Adapter 让你一行代码切换 AI 供应商
 
 ---
 
