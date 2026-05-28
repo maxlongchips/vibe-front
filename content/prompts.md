@@ -7,9 +7,21 @@ description: 前端专用咒语 — 基于五层 Prompt 架构，每一个都经
 
 > 好的 Prompt 不是"请帮我写代码"，而是精确的工程指令。
 
+## 如何使用这个 Prompt 库
+
+每个 Prompt 都包含五个部分，按顺序阅读即可：
+
+1. **使用场景** — 判断你的问题是否适合用这个 Prompt
+2. **Prompt 模板** — 直接复制粘贴，把 `[方括号]` 里的内容替换成你自己的
+3. **实战示例** — 看看别人怎么填的，AI 会输出什么
+4. **使用技巧** — 让结果更好的小窍门
+5. **变体** — 同一类问题的不同变种
+
+**快速上手**：找到匹配你场景的 Prompt → 复制模板 → 替换占位符 → 粘贴给 AI → 得到结果。
+
 ## 五层 Prompt 架构
 
-来自 Stanford HAI 的研究：使用结构化 Prompt 模板的开发者，首次代码准确率比随意提问高 **60%**。没有结构化 Prompt 的团队，节省下来的时间有 40% 花在了返工上。
+来自 Stanford HAI 的研究：使用结构化 Prompt 模板的开发者，首次代码准确率比随意提问高 **60%**。
 
 最有效的开发者 Prompt 遵循五层结构：
 
@@ -32,9 +44,21 @@ description: 前端专用咒语 — 基于五层 Prompt 架构，每一个都经
 └─────────────────────────────────────┘
 ```
 
-## Prompt 链式调用
+不是每个 Prompt 都需要完整的五层，简单问题一两层就够了，复杂问题才需要全部。
 
-复杂工作流不要塞进一个 Prompt。拆成链式调用：
+## Think 关键词
+
+当任务需要深度推理时，在 Prompt 开头使用关键词触发更多计算：
+
+- `think` — 基础推理，适合一般问题
+- `think hard` — 深度分析，适合复杂逻辑
+- `ultrathink` — 最大计算资源，适合架构决策和疑难 Bug
+
+示例：`ultrathink: 这个组件有 500 行，包含用户认证、数据获取、表单验证...`
+
+## 链式调用
+
+复杂工作流不要塞进一个 Prompt。拆成链式调用，每一步确认后再继续：
 
 ```
 步骤 1：分析需求 → 输出技术方案
@@ -45,60 +69,64 @@ description: 前端专用咒语 — 基于五层 Prompt 架构，每一个都经
 
 每一步的输出是下一步的输入。这比一个巨大的 Prompt 效果好得多。
 
-## Think 关键词
+---
 
-当任务需要深度推理时，使用关键词触发更多计算：
+## Prompt 列表
 
-- `think` — 基础推理
-- `think hard` — 深度分析
-- `ultrathink` — 最大计算资源，用于架构决策
+### Bug 排查
+
+控制台报红？行为异常？粘贴报错 + 相关代码，让 AI 定位根因并给出修复方案。
+
+支持两种模式：简单 Bug 直接粘贴报错，复杂 Bug 使用五层架构结构化排查。
+
+[查看完整 Prompt →](/prompts/01-bug-debugging)
 
 ---
 
-每个 Prompt 都包含：**使用场景 → Prompt 模板 → 预期输出 → 使用技巧**。
+### 组件重构
 
-## Bug 排查
+输入一个屎山组件，AI 输出 Composition API 重构版本，自动拆分 composables，生成 TypeScript 类型。
 
-粘贴报错 + 相关代码，让 AI 定位根因并给出修复方案，附带边界条件分析。
+支持 Options API → script setup 转换、composables 提取、性能优化重构。
 
-[查看 Prompt →](/prompts/01-bug-debugging)
-
----
-
-## 组件重构
-
-输入一个"屎山组件"，AI 输出 Composition API 重构版本，自动拆分 composables。
-
-[查看 Prompt →](/prompts/02-component-refactor)
+[查看完整 Prompt →](/prompts/02-component-refactor)
 
 ---
 
-## UI 生成
+### UI 生成
 
-用自然语言描述需求，AI 生成 Tailwind CSS + Vue 3 组件代码，含响应式与暗黑模式。
+用自然语言描述需求（描述"感受"而非"像素"），AI 生成 Tailwind CSS + Vue 3 组件代码，含响应式、暗黑模式、骨架屏。
 
-[查看 Prompt →](/prompts/03-ui-generation)
+支持参考截图生成、表单组件、数据表格、弹窗等常见场景。
 
----
-
-## TypeScript 类型体操
-
-描述数据结构，AI 生成精确的泛型类型定义、Zod Schema、API 响应类型。
-
-[查看 Prompt →](/prompts/04-typescript-types)
+[查看完整 Prompt →](/prompts/03-ui-generation)
 
 ---
 
-## 测试用例生成
+### TypeScript 类型体操
 
-输入组件代码，AI 输出 Vitest 单元测试 + Testing Library 集成测试，覆盖边界场景。
+描述数据结构或贴一条 JSON，AI 生成精确的泛型类型定义、Zod Schema、API 响应类型、API 调用函数。
 
-[查看 Prompt →](/prompts/05-test-generation)
+支持从 JSON 推断类型、类型报错解释、高级类型体操教学。
+
+[查看完整 Prompt →](/prompts/04-typescript-types)
 
 ---
 
-## 性能优化
+### 测试用例生成
 
-输入性能瓶颈描述，AI 分析并给出懒加载、虚拟滚动、缓存策略等具体优化方案。
+输入组件代码，AI 输出 Vitest 单元测试 + Testing Library 集成测试，覆盖正常流程、边界情况、错误处理。
 
-[查看 Prompt →](/prompts/06-performance)
+支持回归测试生成、Composable 测试、快照测试。
+
+[查看完整 Prompt →](/prompts/05-test-generation)
+
+---
+
+### 性能优化
+
+输入性能瓶颈描述和量化数据，AI 分析根因并给出懒加载、虚拟滚动、并行请求、缓存策略等具体优化方案和代码。
+
+支持长列表卡顿、首屏加载慢、API 串行、Bundle 过大、内存泄漏等场景。
+
+[查看完整 Prompt →](/prompts/06-performance)
